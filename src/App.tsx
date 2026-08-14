@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { usePickleballState } from './hooks/usePickleballState';
 import { getAllPlayers } from './utils/rotation';
+import { checkAdminSession, getAdminUsername, logoutAdmin } from './utils/auth';
 import type { Player } from './types';
 import { Header } from './components/Header';
 import { CourtView } from './components/CourtView';
@@ -10,6 +11,8 @@ import { AddPlayerForm } from './components/AddPlayerForm';
 import { EditPlayerModal } from './components/EditPlayerModal';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { MatchHistoryModal } from './components/MatchHistoryModal';
+import { AdminSettingsModal } from './components/AdminSettingsModal';
+import { LoginPage } from './components/LoginPage';
 import { ToastContainer } from './components/Toast';
 
 type ConfirmDialogType =
@@ -25,6 +28,7 @@ export function App() {
     lastActionDescription,
     toasts,
     removeToast,
+    addToast,
     addPlayer,
     startCourt,
     startAllCourts,
@@ -43,12 +47,37 @@ export function App() {
     toggleSound,
   } = usePickleballState();
 
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(checkAdminSession);
+  const [adminUsername, setAdminUsername] = useState<string>(getAdminUsername);
+  const [isSpectatorMode, setIsSpectatorMode] = useState<boolean>(false);
+
   // Modals state
   const [editingPlayer, setEditingPlayer] = useState<Player | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogType>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isAdminSettingsOpen, setIsAdminSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    setIsAuthenticated(checkAdminSession());
+    setAdminUsername(getAdminUsername());
+  }, []);
 
   const allPlayers = useMemo(() => getAllPlayers(state), [state]);
+
+  const handleLoginSuccess = (loginId: string) => {
+    setIsAuthenticated(true);
+    setAdminUsername(loginId);
+    setIsSpectatorMode(false);
+    addToast('Admin Logged In', `Welcome, ${loginId}! Full court control enabled.`, 'success');
+  };
+
+  const handleLogout = () => {
+    logoutAdmin();
+    setIsAuthenticated(false);
+    setIsSpectatorMode(false);
+    addToast('Logged Out', 'Admin session has been ended.', 'info');
+  };
 
   // Handle remove confirmation
   const handleConfirmAction = () => {
@@ -64,8 +93,32 @@ export function App() {
     setConfirmDialog(null);
   };
 
+  // If not authenticated and not in spectator view, show Login Page
+  if (!isAuthenticated && !isSpectatorMode) {
+    return (
+      <LoginPage
+        onLoginSuccess={handleLoginSuccess}
+        onViewAsSpectator={() => setIsSpectatorMode(true)}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-100 dark:bg-slate-950 text-slate-900 dark:text-slate-100 flex flex-col font-sans transition-colors duration-200">
+      {/* Spectator Mode Banner */}
+      {!isAuthenticated && isSpectatorMode && (
+        <div className="bg-amber-500 text-slate-950 px-4 py-2 text-center text-xs font-bold flex items-center justify-center gap-3">
+          <span>👀 Spectator Mode: Live Court View (Read-Only)</span>
+          <button
+            type="button"
+            onClick={() => setIsSpectatorMode(false)}
+            className="px-3 py-1 bg-slate-950 text-white rounded-lg text-xs font-black shadow transition-transform active:scale-95 cursor-pointer"
+          >
+            Admin Log In
+          </button>
+        </div>
+      )}
+
       {/* Header Bar */}
       <Header
         totalPlayers={allPlayers.length}
@@ -77,11 +130,14 @@ export function App() {
         soundEnabled={state.soundEnabled}
         canUndo={canUndo}
         lastActionDescription={lastActionDescription}
+        adminUsername={isAuthenticated ? adminUsername : 'Spectator'}
         onToggleCourt2={toggleCourt2}
         onToggleTheme={toggleTheme}
         onToggleSound={toggleSound}
         onUndo={undo}
         onOpenHistory={() => setIsHistoryOpen(true)}
+        onOpenAdminSettings={() => setIsAdminSettingsOpen(true)}
+        onLogout={handleLogout}
         onRequestResetSession={() => setConfirmDialog({ type: 'reset_session' })}
         onRequestClearAll={() => setConfirmDialog({ type: 'clear_all' })}
       />
@@ -142,7 +198,7 @@ export function App() {
 
       {/* Footer */}
       <footer className="py-6 text-center text-xs text-slate-500 dark:text-slate-500 border-t border-slate-200 dark:border-slate-800/80">
-        <p>Pickleball Queue Manager • Multi-Court & Single-Court Fair FIFO Rotation System • Live Score Tracking</p>
+        <p>Pickleball Queue Manager • Single-Admin Secured • Multi-Court Fair FIFO Rotation</p>
       </footer>
 
       {/* Modals & Dialogs */}
@@ -151,6 +207,13 @@ export function App() {
         player={editingPlayer}
         onSave={editPlayer}
         onClose={() => setEditingPlayer(null)}
+      />
+
+      <AdminSettingsModal
+        isOpen={isAdminSettingsOpen}
+        currentLoginId={adminUsername}
+        onClose={() => setIsAdminSettingsOpen(false)}
+        onCredentialsUpdated={newId => setAdminUsername(newId)}
       />
 
       <ConfirmationModal

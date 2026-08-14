@@ -371,6 +371,7 @@ export function usePickleballState() {
     canUndo: history.length > 0,
     lastActionDescription: history[0]?.description,
     toasts,
+    addToast,
     removeToast,
     addPlayer: handleAddPlayer,
     startCourt: handleStartCourt,

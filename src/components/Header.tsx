@@ -11,6 +11,9 @@ import {
   SlidersHorizontal,
   Lock,
   CheckCircle2,
+  LogOut,
+  Shield,
+  KeyRound,
 } from 'lucide-react';
 import type { CourtData } from '../types';
 
@@ -24,11 +27,14 @@ interface HeaderProps {
   soundEnabled: boolean;
   canUndo: boolean;
   lastActionDescription?: string;
+  adminUsername: string;
   onToggleCourt2: () => void;
   onToggleTheme: () => void;
   onToggleSound: () => void;
   onUndo: () => void;
   onOpenHistory: () => void;
+  onOpenAdminSettings: () => void;
+  onLogout: () => void;
   onRequestResetSession: () => void;
   onRequestClearAll: () => void;
 }
@@ -43,11 +49,14 @@ export const Header: React.FC<HeaderProps> = ({
   soundEnabled,
   canUndo,
   lastActionDescription,
+  adminUsername,
   onToggleCourt2,
   onToggleTheme,
   onToggleSound,
   onUndo,
   onOpenHistory,
+  onOpenAdminSettings,
+  onLogout,
   onRequestResetSession,
   onRequestClearAll,
 }) => {
@@ -83,7 +92,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 hidden sm:block">
-                Fair Turn Rotations • Flexible Court Allocation • Zero Disputes
+                Fair Turn Rotations • Single-Admin Controlled • Zero Disputes
               </p>
             </div>
           </div>
@@ -122,7 +131,7 @@ export const Header: React.FC<HeaderProps> = ({
           </button>
         </div>
 
-        {/* Action Controls & Toggles */}
+        {/* Action Controls & Admin Session */}
         <div className="flex items-center justify-between sm:justify-end gap-1.5 sm:gap-2 flex-wrap">
           {/* Quick Stats Pill */}
           <div className="hidden xl:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 mr-1">
@@ -132,6 +141,23 @@ export const Header: React.FC<HeaderProps> = ({
             <span>•</span>
             <span className="text-emerald-500 font-bold">{activeCourtsCount} Active</span>
           </div>
+
+          {/* Admin Badge */}
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-lime-500/10 text-lime-600 dark:text-lime-400 border border-lime-500/20 text-xs font-bold">
+            <Shield className="w-3.5 h-3.5" />
+            <span className="max-w-[80px] truncate">{adminUsername}</span>
+          </div>
+
+          {/* Admin Security / Change Password */}
+          <button
+            type="button"
+            onClick={onOpenAdminSettings}
+            className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
+            title="Admin Security & Password Settings"
+            aria-label="Admin Settings"
+          >
+            <KeyRound className="w-4 h-4 text-amber-500" />
+          </button>
 
           {/* Undo Button */}
           <button
@@ -210,6 +236,17 @@ export const Header: React.FC<HeaderProps> = ({
             aria-label="Clear All"
           >
             <Trash2 className="w-4 h-4" />
+          </button>
+
+          {/* Logout Button */}
+          <button
+            type="button"
+            onClick={onLogout}
+            className="p-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 transition-colors cursor-pointer"
+            title="Log Out of Admin Session"
+            aria-label="Log Out"
+          >
+            <LogOut className="w-4 h-4" />
           </button>
         </div>
       </div>

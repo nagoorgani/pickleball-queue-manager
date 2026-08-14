@@ -36,6 +36,17 @@ export interface MatchRecord {
   scores?: MatchScores;
 }
 
+export interface AdminCredentials {
+  loginId: string;
+  passwordHash: string; // Stored hash or token
+  updatedAt: number;
+}
+
+export interface AuthState {
+  isAuthenticated: boolean;
+  adminUsername: string;
+}
+
 export interface PickleballState {
   court1: CourtData;
   court2: CourtData;
