@@ -4,6 +4,12 @@ A modern, mobile-friendly web application designed to automatically manage pickl
 
 ---
 
+## 🌐 Live Website
+
+🔗 **[https://nagoorgani.github.io/pickleball-queue-manager](https://nagoorgani.github.io/pickleball-queue-manager)**
+
+---
+
 ## 🌟 Features
 
 ### 🏓 1. Dual Court & Promotion Match Mode
@@ -27,33 +33,24 @@ A modern, mobile-friendly web application designed to automatically manage pickl
 - Auto-winner detection (First to 11, win by 2).
 - **Match History Modal**: Records match number, court name, duration, final scores, and player leaderboards.
 
-### ⚡ 5. Quality & UX
+### 🔐 5. Single-Admin Login Security
+- Protected admin controls guarded by Login ID and Password.
+- Default Admin Credentials:
+  - **Login ID**: `admin`
+  - **Password**: `pickleball123`
+- Spectator View mode available for courtside score display without editing privileges.
+- Admin password update modal with SHA-256 encryption.
+
+### ⚡ 6. Quality & UX
 - **Local Storage Persistence**: State, queues, active games, themes, and match history automatically persist across page reloads.
 - **Multi-Level Undo**: Revert any game rotation, player addition, edit, or removal with one click.
 - **Dark & Light Mode**: Toggle between sports dark theme and high-contrast light theme.
 - **Audio Feedback**: Synthesized court whistle, paddle pops, and victory chimes via Web Audio API.
-- **Demo Data Loader**: 1-click button to load 12 demo players for instant testing.
+- **Demo Data Loader**: 1-click button to load demo players for instant testing.
 
 ---
 
-## 🛠️ Tech Stack
-
-- **Framework**: React 18 + TypeScript + Vite
-- **Styling**: Tailwind CSS
-- **Icons**: Lucide React
-- **Celebration**: Canvas Confetti
-- **Audio**: Web Audio API (Synthesized)
-- **Storage**: Local Storage (No backend required)
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js (v18+ recommended)
-- npm or yarn
-
-### Installation & Run
+## 🚀 Local Development
 
 ```bash
 # 1. Clone repository
@@ -67,9 +64,10 @@ npm install
 
 # 4. Start development server
 npm run dev
-```
 
-Open `http://localhost:5173` in your browser.
+# 5. Build and Deploy to GitHub Pages
+npm run deploy
+```
 
 ---
 
