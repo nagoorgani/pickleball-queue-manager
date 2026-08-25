@@ -186,6 +186,7 @@ export function App() {
             {/* Section 2: Next Match Preview */}
             <NextMatchPreview
               queue={state.queue}
+              groups={state.groups}
               isCourt2Available={state.isCourt2Available}
             />
           </div>

@@ -1,20 +1,27 @@
 import React from 'react';
-import { Users2, Clock, UserCheck } from 'lucide-react';
-import type { Player } from '../types';
+import { Users2, Clock, UserCheck, Shield, Link } from 'lucide-react';
+import type { Player, PlayerGroup } from '../types';
+import { getNextFourForCourt } from '../utils/rotation';
 
 interface NextMatchPreviewProps {
   queue: Player[];
+  groups: PlayerGroup[];
   isCourt2Available: boolean;
 }
 
 export const NextMatchPreview: React.FC<NextMatchPreviewProps> = ({
   queue,
+  groups,
   isCourt2Available,
 }) => {
-  const hasFourWaiting = queue.length >= 4;
+  const { fourPlayers } = getNextFourForCourt(queue, groups);
+  const hasFourReady = Boolean(fourPlayers && fourPlayers.length === 4);
 
-  const nextTeamA = hasFourWaiting ? [queue[0], queue[1]] : [];
-  const nextTeamB = hasFourWaiting ? [queue[2], queue[3]] : [];
+  const nextTeamA = hasFourReady && fourPlayers ? [fourPlayers[0], fourPlayers[1]] : [];
+  const nextTeamB = hasFourReady && fourPlayers ? [fourPlayers[2], fourPlayers[3]] : [];
+
+  const groupMap = new Map<string, PlayerGroup>();
+  groups.forEach(g => groupMap.set(g.id, g));
 
   return (
     <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl relative overflow-hidden">
@@ -28,12 +35,12 @@ export const NextMatchPreview: React.FC<NextMatchPreviewProps> = ({
               Section 2: Next Match Preview
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Next 4 players on deck in arrival order ({isCourt2Available ? '2-Court Shared Queue' : '1-Court Queue'})
+              Next 4 players on deck according to rotation rules ({isCourt2Available ? '2-Court Shared Queue' : '1-Court Queue'})
             </p>
           </div>
         </div>
 
-        {hasFourWaiting ? (
+        {hasFourReady ? (
           <span className="px-3 py-1 rounded-full text-xs font-bold bg-sky-500/10 text-sky-600 dark:text-sky-400 border border-sky-500/20">
             On Deck Ready
           </span>
@@ -44,7 +51,7 @@ export const NextMatchPreview: React.FC<NextMatchPreviewProps> = ({
         )}
       </div>
 
-      {hasFourWaiting ? (
+      {hasFourReady ? (
         <div className="bg-slate-50 dark:bg-slate-950/70 rounded-2xl p-4 border border-slate-200 dark:border-slate-800/80">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 relative">
             {/* NEXT TEAM A */}
@@ -54,28 +61,39 @@ export const NextMatchPreview: React.FC<NextMatchPreviewProps> = ({
                   Next Team A
                 </span>
                 <span className="text-[10px] text-slate-400 font-medium">
-                  Queue #1 & #2
+                  Position 1 & 2
                 </span>
               </div>
               <div className="space-y-1.5">
-                {nextTeamA.map((p, idx) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/60"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-[10px] font-bold flex items-center justify-center">
-                        1.{idx + 1}
-                      </span>
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                        {p.name}
+                {nextTeamA.map((p, idx) => {
+                  const group = p.groupId ? groupMap.get(p.groupId) : null;
+                  return (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/60"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="w-5 h-5 rounded-full bg-emerald-500/20 text-emerald-600 dark:text-emerald-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                          A{idx + 1}
+                        </span>
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                          {p.name}
+                        </span>
+                        {group && (
+                          <span
+                            className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-lime-500/15 text-lime-600 dark:text-lime-400 flex items-center gap-0.5 flex-shrink-0"
+                            title={group.name}
+                          >
+                            {group.playerIds.length === 4 ? <Shield className="w-2.5 h-2.5" /> : <Link className="w-2.5 h-2.5" />}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-medium flex-shrink-0">
+                        {p.gamesPlayed}g
                       </span>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-medium">
-                      {p.gamesPlayed}g
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -86,35 +104,46 @@ export const NextMatchPreview: React.FC<NextMatchPreviewProps> = ({
                   Next Team B
                 </span>
                 <span className="text-[10px] text-slate-400 font-medium">
-                  Queue #3 & #4
+                  Position 3 & 4
                 </span>
               </div>
               <div className="space-y-1.5">
-                {nextTeamB.map((p, idx) => (
-                  <div
-                    key={p.id}
-                    className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/60"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-600 dark:text-sky-300 text-[10px] font-bold flex items-center justify-center">
-                        2.{idx + 1}
-                      </span>
-                      <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
-                        {p.name}
+                {nextTeamB.map((p, idx) => {
+                  const group = p.groupId ? groupMap.get(p.groupId) : null;
+                  return (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 border border-slate-100 dark:border-slate-700/60"
+                    >
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="w-5 h-5 rounded-full bg-sky-500/20 text-sky-600 dark:text-sky-300 text-[10px] font-bold flex items-center justify-center flex-shrink-0">
+                          B{idx + 1}
+                        </span>
+                        <span className="text-xs font-bold text-slate-800 dark:text-slate-200 truncate">
+                          {p.name}
+                        </span>
+                        {group && (
+                          <span
+                            className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-lime-500/15 text-lime-600 dark:text-lime-400 flex items-center gap-0.5 flex-shrink-0"
+                            title={group.name}
+                          >
+                            {group.playerIds.length === 4 ? <Shield className="w-2.5 h-2.5" /> : <Link className="w-2.5 h-2.5" />}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[10px] text-slate-400 font-medium flex-shrink-0">
+                        {p.gamesPlayed}g
                       </span>
                     </div>
-                    <span className="text-[10px] text-slate-400 font-medium">
-                      {p.gamesPlayed}g
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
 
           <div className="mt-3 flex items-center justify-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
             <UserCheck className="w-3.5 h-3.5 text-lime-500" />
-            <span>These 4 players will take whichever court finishes first.</span>
+            <span>These 4 players will take whichever court finishes next according to rotation rules.</span>
           </div>
         </div>
       ) : (
