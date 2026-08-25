@@ -25,7 +25,7 @@ interface CourtViewProps {
   onRequestResetSession: () => void;
   onEditPlayer: (player: Player) => void;
   onRequestRemovePlayer: (player: Player) => void;
-  onDropOnCourt?: (dragData: DragItemData, targetCourtId: 1 | 2, targetTeam?: 'teamA' | 'teamB') => void;
+  onDropOnCourt?: (dragData: DragItemData, targetCourtId: 1 | 2, targetTeam?: 'teamA' | 'teamB', targetPlayerId?: string) => void;
 }
 
 export const CourtView: React.FC<CourtViewProps> = ({
@@ -122,7 +122,7 @@ export const CourtView: React.FC<CourtViewProps> = ({
         </button>
       )}
 
-      {/* Courts Layout Grid - Stacked with full width so Team A and Team B have maximum room */}
+      {/* Courts Layout Grid */}
       <div className="grid grid-cols-1 gap-6">
         {/* COURT 1 CARD */}
         <CourtCard

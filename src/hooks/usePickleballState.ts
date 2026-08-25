@@ -123,14 +123,14 @@ export function usePickleballState() {
     [state, pushHistory]
   );
 
-  // 5. Drop on Court (Drag & Drop)
+  // 5. Drop on Court (Drag & Drop with Side/Position Swap)
   const handleDropOnCourt = useCallback(
-    (dragData: DragItemData, targetCourtId: 1 | 2, targetTeam?: 'teamA' | 'teamB') => {
-      const nextState = dropOnCourt(state, dragData, targetCourtId, targetTeam);
-      pushHistory(`Moved player/group to Court ${targetCourtId}`, state);
+    (dragData: DragItemData, targetCourtId: 1 | 2, targetTeam?: 'teamA' | 'teamB', targetPlayerId?: string) => {
+      const nextState = dropOnCourt(state, dragData, targetCourtId, targetTeam, targetPlayerId);
+      pushHistory(`Swapped player/group on Court ${targetCourtId}`, state);
       setState(nextState);
       if (state.soundEnabled) soundFx.playPop();
-      addToast('Court Updated', `Player/Group assigned to Court ${targetCourtId}.`, 'success');
+      addToast('Court Positions Swapped!', `Player/Group swapped positions on Court ${targetCourtId}.`, 'success');
     },
     [state, addToast, pushHistory]
   );

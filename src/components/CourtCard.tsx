@@ -32,7 +32,7 @@ interface CourtCardProps {
   onToggleAvailability?: () => void;
   onEditPlayer: (player: Player) => void;
   onRequestRemovePlayer: (player: Player) => void;
-  onDropOnCourt?: (dragData: DragItemData, targetCourtId: 1 | 2, targetTeam?: 'teamA' | 'teamB') => void;
+  onDropOnCourt?: (dragData: DragItemData, targetCourtId: 1 | 2, targetTeam?: 'teamA' | 'teamB', targetPlayerId?: string) => void;
 }
 
 export const CourtCard: React.FC<CourtCardProps> = ({
@@ -101,6 +101,22 @@ export const CourtCard: React.FC<CourtCardProps> = ({
       const dragData = JSON.parse(raw) as DragItemData;
       if (onDropOnCourt) {
         onDropOnCourt(dragData, court.id, team);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleDropOnPlayer = (e: React.DragEvent, targetPlayer: Player, team: 'teamA' | 'teamB') => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverTeam(null);
+    try {
+      const raw = e.dataTransfer.getData('application/json');
+      if (!raw) return;
+      const dragData = JSON.parse(raw) as DragItemData;
+      if (onDropOnCourt) {
+        onDropOnCourt(dragData, court.id, team, targetPlayer.id);
       }
     } catch {
       // ignore
@@ -254,7 +270,12 @@ export const CourtCard: React.FC<CourtCardProps> = ({
                     key={player.id}
                     draggable
                     onDragStart={e => handleDragStartCourtPlayer(e, player, 'teamA')}
-                    className="bg-white dark:bg-slate-900 rounded-xl p-3 border border-emerald-400/40 shadow-sm flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing"
+                    onDragOver={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={e => handleDropOnPlayer(e, player, 'teamA')}
+                    className="bg-white dark:bg-slate-900 rounded-xl p-3 border border-emerald-400/40 shadow-sm flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing hover:border-lime-400 transition-colors"
                   >
                     <div className="min-w-0 flex-1 flex items-center gap-2">
                       <div className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">
@@ -348,7 +369,12 @@ export const CourtCard: React.FC<CourtCardProps> = ({
                     key={player.id}
                     draggable
                     onDragStart={e => handleDragStartCourtPlayer(e, player, 'teamB')}
-                    className="bg-white dark:bg-slate-900 rounded-xl p-3 border border-sky-400/40 shadow-sm flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing"
+                    onDragOver={e => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                    }}
+                    onDrop={e => handleDropOnPlayer(e, player, 'teamB')}
+                    className="bg-white dark:bg-slate-900 rounded-xl p-3 border border-sky-400/40 shadow-sm flex items-center justify-between gap-2 cursor-grab active:cursor-grabbing hover:border-lime-400 transition-colors"
                   >
                     <div className="min-w-0 flex-1 flex items-center gap-2">
                       <div className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200">

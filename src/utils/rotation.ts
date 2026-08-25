@@ -131,7 +131,6 @@ export function createPlayerGroup(
     return { nextState: state, error: 'Some selected players could not be found.' };
   }
 
-  // Check if any player is already in a group
   const alreadyGrouped = targetPlayers.find(p => p.groupId);
   if (alreadyGrouped) {
     return {
@@ -152,16 +151,13 @@ export function createPlayerGroup(
     createdAt: Date.now(),
   };
 
-  // Update players with groupId
   const updatePlayerGroup = (p: Player): Player =>
     playerIds.includes(p.id) ? { ...p, groupId } : p;
 
   let nextQueue = state.queue.map(updatePlayerGroup);
 
-  // Group members in queue together so they sit adjacently as a single unit
   const groupedInQueue = nextQueue.filter(p => playerIds.includes(p.id));
   if (groupedInQueue.length > 0) {
-    // Find index of first member
     const firstIdx = nextQueue.findIndex(p => playerIds.includes(p.id));
     const nonGrouped = nextQueue.filter(p => !playerIds.includes(p.id));
     nonGrouped.splice(firstIdx, 0, ...groupedInQueue);
@@ -212,7 +208,7 @@ export function unlinkPlayerGroup(
 
 /**
  * =========================================================================
- * DRAG & DROP: Queue Reordering (Supports single players & linked groups)
+ * DRAG & DROP: Queue Reordering
  * =========================================================================
  */
 export function reorderQueueItem(
@@ -229,7 +225,6 @@ export function reorderQueueItem(
     itemsToMove = queue.filter(p => p.groupId === draggedPlayer.groupId);
   }
 
-  // Remove items to move
   const remainingQueue = queue.filter(p => !itemsToMove.some(m => m.id === p.id));
   const clampedTarget = Math.max(0, Math.min(targetIndex, remainingQueue.length));
 
@@ -243,69 +238,171 @@ export function reorderQueueItem(
 
 /**
  * =========================================================================
- * DRAG & DROP: Drag Player / Group to Court
+ * DRAG & DROP: Drag Player / Group to Court (SWAP POSITIONS, NO REPLACEMENT)
  * =========================================================================
  */
 export function dropOnCourt(
   state: PickleballState,
   dragData: DragItemData,
   targetCourtId: 1 | 2,
-  targetTeam?: 'teamA' | 'teamB'
+  targetTeam: 'teamA' | 'teamB' = 'teamA',
+  targetPlayerId?: string
 ): PickleballState {
-  const targetCourtKey = targetCourtId === 1 ? 'court1' : 'court2';
-
   if (targetCourtId === 2 && !state.isCourt2Available) return state;
 
+  const targetCourtKey = targetCourtId === 1 ? 'court1' : 'court2';
+  const targetCourt = state[targetCourtKey];
+
+  // CASE 1: Court has active match (Team A & Team B active)
+  if (targetCourt.teamA && targetCourt.teamB) {
+
+    // Subcase 1A: Source is COURT (Dragging from Court to Court)
+    if (dragData.source === 'court' && dragData.courtId) {
+      const sourceCourtKey = dragData.courtId === 1 ? 'court1' : 'court2';
+      const sourceCourt = state[sourceCourtKey];
+      const draggedPlayerId = dragData.id;
+
+      const sourceTeam = dragData.team || 'teamA';
+      const sourcePlayers = [...(sourceCourt[sourceTeam] || [])] as [Player, Player];
+      const destPlayers = [...(targetCourt[targetTeam] || [])] as [Player, Player];
+
+      const draggedIdx = sourcePlayers.findIndex(p => p.id === draggedPlayerId);
+      if (draggedIdx === -1) return state;
+
+      const targetIdx = targetPlayerId
+        ? destPlayers.findIndex(p => p.id === targetPlayerId)
+        : 0;
+      const validTargetIdx = targetIdx !== -1 ? targetIdx : 0;
+
+      // Swap players between source and target
+      if (dragData.courtId === targetCourtId && sourceTeam === targetTeam) {
+        // Dragging onto teammate in same team -> swap A1 and A2
+        const otherIdx = draggedIdx === 0 ? 1 : 0;
+        const temp = sourcePlayers[draggedIdx];
+        sourcePlayers[draggedIdx] = sourcePlayers[otherIdx];
+        sourcePlayers[otherIdx] = temp;
+
+        return {
+          ...state,
+          [targetCourtKey]: {
+            ...targetCourt,
+            [sourceTeam]: sourcePlayers,
+          },
+        };
+      }
+
+      // Dragging between Team A and Team B (or different courts)
+      const temp = sourcePlayers[draggedIdx];
+      sourcePlayers[draggedIdx] = destPlayers[validTargetIdx];
+      destPlayers[validTargetIdx] = temp;
+
+      if (dragData.courtId === targetCourtId) {
+        // Same court, different team -> Swap sides!
+        return {
+          ...state,
+          [targetCourtKey]: {
+            ...targetCourt,
+            [sourceTeam]: sourcePlayers,
+            [targetTeam]: destPlayers,
+          },
+        };
+      } else {
+        // Different court -> Swap players across courts!
+        return {
+          ...state,
+          [sourceCourtKey]: {
+            ...sourceCourt,
+            [sourceTeam]: sourcePlayers,
+          },
+          [targetCourtKey]: {
+            ...targetCourt,
+            [targetTeam]: destPlayers,
+          },
+        };
+      }
+    }
+
+    // Subcase 1B: Source is QUEUE (Dragging player or duo from Queue to Court)
+    if (dragData.source === 'queue') {
+      const destPlayers = [...(targetCourt[targetTeam] || [])] as [Player, Player];
+      const queuePlayersToMove = state.queue.filter(p => dragData.playerIds.includes(p.id));
+      if (queuePlayersToMove.length === 0) return state;
+
+      if (queuePlayersToMove.length === 1) {
+        // Single player from queue SWAPS with target court player!
+        const singleQueuePlayer = queuePlayersToMove[0];
+        const targetIdx = targetPlayerId
+          ? destPlayers.findIndex(p => p.id === targetPlayerId)
+          : 0;
+        const validTargetIdx = targetIdx !== -1 ? targetIdx : 0;
+
+        const displacedCourtPlayer = destPlayers[validTargetIdx];
+        destPlayers[validTargetIdx] = singleQueuePlayer;
+
+        // Displaced court player takes the queue position of the dragged player
+        const queueIdx = typeof dragData.queueIndex === 'number' ? dragData.queueIndex : 0;
+        const nextQueue = [...state.queue];
+        const replaceAt = nextQueue.findIndex(p => p.id === singleQueuePlayer.id);
+        if (replaceAt !== -1) {
+          nextQueue[replaceAt] = displacedCourtPlayer;
+        } else {
+          nextQueue.splice(queueIdx, 0, displacedCourtPlayer);
+        }
+
+        return {
+          ...state,
+          [targetCourtKey]: {
+            ...targetCourt,
+            [targetTeam]: destPlayers,
+          },
+          queue: nextQueue,
+        };
+      } else if (queuePlayersToMove.length === 2) {
+        // Preset Duo from queue SWAPS with team on court!
+        const displacedTeamPlayers = destPlayers;
+        const newTeamDuo: [Player, Player] = [queuePlayersToMove[0], queuePlayersToMove[1]];
+
+        const firstDuoIdx = state.queue.findIndex(p => p.id === queuePlayersToMove[0].id);
+        const nextQueue = state.queue.filter(p => !queuePlayersToMove.some(q => q.id === p.id));
+        const insertAt = firstDuoIdx !== -1 ? firstDuoIdx : nextQueue.length;
+        nextQueue.splice(insertAt, 0, ...displacedTeamPlayers);
+
+        return {
+          ...state,
+          [targetCourtKey]: {
+            ...targetCourt,
+            [targetTeam]: newTeamDuo,
+          },
+          queue: nextQueue,
+        };
+      }
+    }
+  }
+
+  // CASE 2: Empty court or incomplete team -> Fill slots
   const allPlayers = getAllPlayers(state);
   const playersToMove = allPlayers.filter(p => dragData.playerIds.includes(p.id));
   if (playersToMove.length === 0) return state;
 
-  // Remove moved players from queue & courts
   let nextState = removePlayersFromState(state, dragData.playerIds);
-
   const currentCourt = nextState[targetCourtKey];
-  let currentCourtPlayers = getCourtPlayers(currentCourt);
+  let currentCourtPlayers = getCourtPlayers(currentCourt).filter(p => !dragData.playerIds.includes(p.id));
 
-  // Filter out any moved players if already on this court
-  currentCourtPlayers = currentCourtPlayers.filter(p => !dragData.playerIds.includes(p.id));
-
-  // Merge new players into court
-  const combinedCourtPlayers = [...currentCourtPlayers, ...playersToMove];
-
-  let newTeamA: [Player, Player] | null = currentCourt.teamA;
-  let newTeamB: [Player, Player] | null = currentCourt.teamB;
-
-  if (combinedCourtPlayers.length >= 4) {
-    const four = combinedCourtPlayers.slice(0, 4);
-    const teams = createTeams(four);
-    newTeamA = teams.teamA;
-    newTeamB = teams.teamB;
-  } else if (targetTeam === 'teamA' && playersToMove.length === 2) {
-    newTeamA = [playersToMove[0], playersToMove[1]];
-  } else if (targetTeam === 'teamB' && playersToMove.length === 2) {
-    newTeamB = [playersToMove[0], playersToMove[1]];
-  } else {
-    // Fill available slots sequentially
-    const currentList = [...(newTeamA || []), ...(newTeamB || [])];
-    const uniqueList = Array.from(new Set([...currentList, ...playersToMove]));
-    if (uniqueList.length >= 4) {
-      const teams = createTeams(uniqueList.slice(0, 4));
-      newTeamA = teams.teamA;
-      newTeamB = teams.teamB;
-    }
+  const combined = [...currentCourtPlayers, ...playersToMove];
+  if (combined.length >= 4) {
+    const teams = createTeams(combined.slice(0, 4));
+    return {
+      ...nextState,
+      [targetCourtKey]: {
+        ...currentCourt,
+        teamA: teams.teamA,
+        teamB: teams.teamB,
+        matchStartTime: currentCourt.matchStartTime || Date.now(),
+      },
+    };
   }
 
-  const updatedCourt: CourtData = {
-    ...currentCourt,
-    teamA: newTeamA,
-    teamB: newTeamB,
-    matchStartTime: newTeamA && newTeamB ? (currentCourt.matchStartTime || Date.now()) : null,
-  };
-
-  return {
-    ...nextState,
-    [targetCourtKey]: updatedCourt,
-  };
+  return nextState;
 }
 
 /**
@@ -484,16 +581,13 @@ export function finishCourtGameAndRotate(
     scores: matchScores,
   };
 
-  // 1. Increment gamesPlayed
   const updatedCourtPlayers: Player[] = courtPlayers.map(p => ({
     ...p,
     gamesPlayed: p.gamesPlayed + 1,
   }));
 
-  // 2. Append finished court players to end of queue, preserving group groupings
   const combinedQueue = [...state.queue, ...updatedCourtPlayers];
 
-  // 3. Take next 4 from queue for this court if available
   let nextTeamA: [Player, Player] | null = null;
   let nextTeamB: [Player, Player] | null = null;
   let nextQueue: Player[] = combinedQueue;
@@ -616,7 +710,6 @@ export function removePlayerFromState(
   state: PickleballState,
   playerId: string
 ): { nextState: PickleballState; removedPlayer?: Player } {
-  // Check queue
   const inQueueIdx = state.queue.findIndex(p => p.id === playerId);
   if (inQueueIdx !== -1) {
     const removedPlayer = state.queue[inQueueIdx];
@@ -629,7 +722,6 @@ export function removePlayerFromState(
     };
   }
 
-  // Check Court 1
   const c1Players = getCourtPlayers(state.court1);
   const inC1Idx = c1Players.findIndex(p => p.id === playerId);
   if (inC1Idx !== -1) {
@@ -660,7 +752,6 @@ export function removePlayerFromState(
     }
   }
 
-  // Check Court 2
   const c2Players = getCourtPlayers(state.court2);
   const inC2Idx = c2Players.findIndex(p => p.id === playerId);
   if (inC2Idx !== -1) {
