@@ -82,17 +82,18 @@ export function usePickleballState() {
 
   // 2. Preset Group Creation
   const handleCreateGroup = useCallback(
-    (playerIds: string[], groupName?: string) => {
-      const { nextState, newGroup, error } = createPlayerGroup(state, playerIds, groupName);
+    (playerIds: string[], groupName?: string, groupType?: 'duo' | 'foursome') => {
+      const { nextState, newGroup, error } = createPlayerGroup(state, playerIds, groupName, groupType);
       if (error) {
         addToast('Group Creation Failed', error, 'warning');
         return false;
       }
 
+      const typeLabel = groupType === 'foursome' || playerIds.length === 4 ? '4-Player Group (Never Split)' : 'Partner Duo';
       pushHistory(`Created preset group "${newGroup?.name}"`, state);
       setState(nextState);
       if (state.soundEnabled) soundFx.playWhistle();
-      addToast('Preset Group Created!', `Linked ${playerIds.length} players into "${newGroup?.name}".`, 'success');
+      addToast('Preset Group Created!', `Linked ${playerIds.length} players into "${newGroup?.name}" (${typeLabel}).`, 'success');
       return true;
     },
     [state, addToast, pushHistory]

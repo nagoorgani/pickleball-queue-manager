@@ -193,11 +193,16 @@ export const WaitingQueue: React.FC<WaitingQueueProps> = ({
                     className="p-2 px-3 rounded-t-2xl bg-slate-100 dark:bg-slate-950 border border-b-0 border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 shadow-sm"
                     style={{ borderTopColor: group.color, borderTopWidth: '3px' }}
                   >
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <Sparkles className="w-3.5 h-3.5 text-amber-500" />
                       <span className="text-[11px] font-black uppercase tracking-wider text-slate-800 dark:text-slate-200">
-                        Preset Team: {group.name}
+                        {group.playerIds.length === 4 ? '🛡️ 4-Player Match Group' : 'Preset Team'}: {group.name}
                       </span>
+                      {group.playerIds.length === 4 && (
+                        <span className="px-1.5 py-0.2 rounded text-[9px] font-black uppercase bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+                          Never Split
+                        </span>
+                      )}
                     </div>
 
                     <button

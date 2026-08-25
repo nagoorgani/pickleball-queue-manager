@@ -12,6 +12,8 @@ export interface PlayerGroup {
   id: string;
   name: string;
   playerIds: string[];
+  groupType?: 'duo' | 'foursome';
+  neverSplit?: boolean;
   color: string; // Tailwind color token or hex
   createdAt: number;
 }

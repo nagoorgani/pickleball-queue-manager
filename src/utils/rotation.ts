@@ -111,14 +111,15 @@ export function addPlayerToState(
 
 /**
  * =========================================================================
- * PRESET GROUPS (PLAYER MATCHING / LINKED PAIRS)
+ * PRESET GROUPS (PLAYER MATCHING / LINKED PAIRS / 4-PLAYER FOURSOMES)
  * =========================================================================
  */
 
 export function createPlayerGroup(
   state: PickleballState,
   playerIds: string[],
-  groupName?: string
+  groupName?: string,
+  groupType: 'duo' | 'foursome' = playerIds.length === 4 ? 'foursome' : 'duo'
 ): { nextState: PickleballState; newGroup?: PlayerGroup; error?: string } {
   if (playerIds.length < 2 || playerIds.length > 4) {
     return { nextState: state, error: 'A preset group must contain between 2 and 4 players.' };
@@ -141,12 +142,18 @@ export function createPlayerGroup(
 
   const groupId = `group_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
   const color = GROUP_COLORS[state.groups.length % GROUP_COLORS.length];
-  const autoName = groupName?.trim() || `Duo: ${targetPlayers.map(p => p.name).join(' & ')}`;
+  const autoName =
+    groupName?.trim() ||
+    (groupType === 'foursome' || playerIds.length === 4
+      ? `Match Group: ${targetPlayers.map(p => p.name).join(', ')}`
+      : `Duo: ${targetPlayers.map(p => p.name).join(' & ')}`);
 
   const newGroup: PlayerGroup = {
     id: groupId,
     name: autoName,
     playerIds,
+    groupType,
+    neverSplit: true,
     color,
     createdAt: Date.now(),
   };
@@ -208,6 +215,82 @@ export function unlinkPlayerGroup(
 
 /**
  * =========================================================================
+ * ROTATION SELECTION ALGORITHM (5-CASE RULE FOR 4-PLAYER PRESET GROUPS)
+ * =========================================================================
+ */
+export function getNextFourForCourt(
+  queue: Player[],
+  groups: PlayerGroup[]
+): { fourPlayers: Player[] | null; remainingQueue: Player[] } {
+  if (queue.length < 4) {
+    return { fourPlayers: null, remainingQueue: queue };
+  }
+
+  // Find first 4-player "neverSplit" group in queue
+  const foursomeGroup = groups.find(
+    g => g.playerIds.length === 4 && g.neverSplit !== false
+  );
+
+  if (!foursomeGroup) {
+    // Standard rotation: top 4
+    return {
+      fourPlayers: queue.slice(0, 4),
+      remainingQueue: queue.slice(4),
+    };
+  }
+
+  const groupMemberIds = new Set(foursomeGroup.playerIds);
+  const queueGroupMembers = queue.filter(p => groupMemberIds.has(p.id));
+
+  if (queueGroupMembers.length !== 4) {
+    // Group members not all in queue, standard top 4
+    return {
+      fourPlayers: queue.slice(0, 4),
+      remainingQueue: queue.slice(4),
+    };
+  }
+
+  const firstMemberIdx = queue.findIndex(p => groupMemberIds.has(p.id));
+
+  // Count individual players ahead of Group G
+  const playersAhead = queue.slice(0, firstMemberIdx);
+  const N = playersAhead.length;
+
+  // CASE 0 (0 ahead) & CASE 4 (4+ ahead): Top 4 from queue form the match
+  if (N === 0 || N >= 4) {
+    return {
+      fourPlayers: queue.slice(0, 4),
+      remainingQueue: queue.slice(4),
+    };
+  }
+
+  // CASE 1 (1 ahead), CASE 2 (2 ahead), CASE 3 (3 ahead):
+  // Collect N players ahead, skip 4-player Group G, take (4 - N) players from BELOW Group G
+  const queueAfterFirstMember = queue.slice(firstMemberIdx);
+  const queueBelowGroup = queueAfterFirstMember.filter(p => !groupMemberIds.has(p.id));
+
+  const neededFromBelow = 4 - N;
+
+  if (queueBelowGroup.length >= neededFromBelow) {
+    const belowPlayersToTake = queueBelowGroup.slice(0, neededFromBelow);
+
+    const fourPlayers = [...playersAhead, ...belowPlayersToTake];
+
+    // Reconstruct remaining queue: Group G stays intact at #1, followed by remaining below players
+    const remainingBelow = queueBelowGroup.slice(neededFromBelow);
+    const remainingQueue = [...queueGroupMembers, ...remainingBelow];
+
+    return { fourPlayers, remainingQueue };
+  } else {
+    // Insufficient players below Group G to fill individual match -> Group G plays next as 4 players!
+    const fourPlayers = queueGroupMembers;
+    const remainingQueue = queue.filter(p => !groupMemberIds.has(p.id));
+    return { fourPlayers, remainingQueue };
+  }
+}
+
+/**
+ * =========================================================================
  * DRAG & DROP: Queue Reordering
  * =========================================================================
  */
@@ -253,10 +336,7 @@ export function dropOnCourt(
   const targetCourtKey = targetCourtId === 1 ? 'court1' : 'court2';
   const targetCourt = state[targetCourtKey];
 
-  // CASE 1: Court has active match (Team A & Team B active)
   if (targetCourt.teamA && targetCourt.teamB) {
-
-    // Subcase 1A: Source is COURT (Dragging from Court to Court)
     if (dragData.source === 'court' && dragData.courtId) {
       const sourceCourtKey = dragData.courtId === 1 ? 'court1' : 'court2';
       const sourceCourt = state[sourceCourtKey];
@@ -274,9 +354,7 @@ export function dropOnCourt(
         : 0;
       const validTargetIdx = targetIdx !== -1 ? targetIdx : 0;
 
-      // Swap players between source and target
       if (dragData.courtId === targetCourtId && sourceTeam === targetTeam) {
-        // Dragging onto teammate in same team -> swap A1 and A2
         const otherIdx = draggedIdx === 0 ? 1 : 0;
         const temp = sourcePlayers[draggedIdx];
         sourcePlayers[draggedIdx] = sourcePlayers[otherIdx];
@@ -291,13 +369,11 @@ export function dropOnCourt(
         };
       }
 
-      // Dragging between Team A and Team B (or different courts)
       const temp = sourcePlayers[draggedIdx];
       sourcePlayers[draggedIdx] = destPlayers[validTargetIdx];
       destPlayers[validTargetIdx] = temp;
 
       if (dragData.courtId === targetCourtId) {
-        // Same court, different team -> Swap sides!
         return {
           ...state,
           [targetCourtKey]: {
@@ -307,7 +383,6 @@ export function dropOnCourt(
           },
         };
       } else {
-        // Different court -> Swap players across courts!
         return {
           ...state,
           [sourceCourtKey]: {
@@ -322,14 +397,12 @@ export function dropOnCourt(
       }
     }
 
-    // Subcase 1B: Source is QUEUE (Dragging player or duo from Queue to Court)
     if (dragData.source === 'queue') {
       const destPlayers = [...(targetCourt[targetTeam] || [])] as [Player, Player];
       const queuePlayersToMove = state.queue.filter(p => dragData.playerIds.includes(p.id));
       if (queuePlayersToMove.length === 0) return state;
 
       if (queuePlayersToMove.length === 1) {
-        // Single player from queue SWAPS with target court player!
         const singleQueuePlayer = queuePlayersToMove[0];
         const targetIdx = targetPlayerId
           ? destPlayers.findIndex(p => p.id === targetPlayerId)
@@ -339,7 +412,6 @@ export function dropOnCourt(
         const displacedCourtPlayer = destPlayers[validTargetIdx];
         destPlayers[validTargetIdx] = singleQueuePlayer;
 
-        // Displaced court player takes the queue position of the dragged player
         const queueIdx = typeof dragData.queueIndex === 'number' ? dragData.queueIndex : 0;
         const nextQueue = [...state.queue];
         const replaceAt = nextQueue.findIndex(p => p.id === singleQueuePlayer.id);
@@ -357,8 +429,7 @@ export function dropOnCourt(
           },
           queue: nextQueue,
         };
-      } else if (queuePlayersToMove.length === 2) {
-        // Preset Duo from queue SWAPS with team on court!
+      } else if (queuePlayersToMove.length >= 2) {
         const displacedTeamPlayers = destPlayers;
         const newTeamDuo: [Player, Player] = [queuePlayersToMove[0], queuePlayersToMove[1]];
 
@@ -379,7 +450,6 @@ export function dropOnCourt(
     }
   }
 
-  // CASE 2: Empty court or incomplete team -> Fill slots
   const allPlayers = getAllPlayers(state);
   const playersToMove = allPlayers.filter(p => dragData.playerIds.includes(p.id));
   if (playersToMove.length === 0) return state;
@@ -437,7 +507,7 @@ function removePlayersFromState(state: PickleballState, playerIds: string[]): Pi
 
 /**
  * =========================================================================
- * ROTATION ALGORITHM: Start Court Match
+ * ROTATION ALGORITHM: Start Court Match (With 5-Case Rule)
  * =========================================================================
  */
 export function startCourtMatch(
@@ -450,13 +520,13 @@ export function startCourtMatch(
     return { nextState: state, error: 'Court 2 is currently reserved for promotion matches.' };
   }
 
-  if (state.queue.length < 4) {
+  const { fourPlayers, remainingQueue } = getNextFourForCourt(state.queue, state.groups);
+
+  if (!fourPlayers || fourPlayers.length < 4) {
     return { nextState: state, error: `Need at least 4 waiting players to start ${targetCourt.name}.` };
   }
 
-  const firstFour = state.queue.slice(0, 4);
-  const remainingQueue = state.queue.slice(4);
-  const teams = createTeams(firstFour);
+  const teams = createTeams(fourPlayers);
 
   const updatedCourt: CourtData = {
     ...targetCourt,
@@ -493,29 +563,33 @@ export function startAllAvailableCourts(state: PickleballState): {
   let nextCourt2 = { ...state.court2 };
 
   if (!nextCourt1.teamA && queue.length >= 4) {
-    const c1Players = queue.slice(0, 4);
-    queue = queue.slice(4);
-    const teams = createTeams(c1Players);
-    nextCourt1 = {
-      ...nextCourt1,
-      teamA: teams.teamA,
-      teamB: teams.teamB,
-      matchStartTime: Date.now(),
-      currentScores: { teamA: 0, teamB: 0 },
-    };
+    const { fourPlayers, remainingQueue } = getNextFourForCourt(queue, state.groups);
+    if (fourPlayers) {
+      queue = remainingQueue;
+      const teams = createTeams(fourPlayers);
+      nextCourt1 = {
+        ...nextCourt1,
+        teamA: teams.teamA,
+        teamB: teams.teamB,
+        matchStartTime: Date.now(),
+        currentScores: { teamA: 0, teamB: 0 },
+      };
+    }
   }
 
   if (state.isCourt2Available && !nextCourt2.teamA && queue.length >= 4) {
-    const c2Players = queue.slice(0, 4);
-    queue = queue.slice(4);
-    const teams = createTeams(c2Players);
-    nextCourt2 = {
-      ...nextCourt2,
-      teamA: teams.teamA,
-      teamB: teams.teamB,
-      matchStartTime: Date.now(),
-      currentScores: { teamA: 0, teamB: 0 },
-    };
+    const { fourPlayers, remainingQueue } = getNextFourForCourt(queue, state.groups);
+    if (fourPlayers) {
+      queue = remainingQueue;
+      const teams = createTeams(fourPlayers);
+      nextCourt2 = {
+        ...nextCourt2,
+        teamA: teams.teamA,
+        teamB: teams.teamB,
+        matchStartTime: Date.now(),
+        currentScores: { teamA: 0, teamB: 0 },
+      };
+    }
   }
 
   return {
@@ -595,16 +669,19 @@ export function finishCourtGameAndRotate(
   let nextMatchStartTime: number | null = null;
 
   if (existingQueue.length >= 4) {
-    // If there were already 4+ players waiting in queue, start next match with them
-    const nextFour = existingQueue.slice(0, 4);
-    const remainingQueue = existingQueue.slice(4);
-    const teams = createTeams(nextFour);
-    nextTeamA = teams.teamA;
-    nextTeamB = teams.teamB;
-    nextMatchStartTime = now;
-    nextQueue = [...remainingQueue, ...updatedCourtPlayers];
+    // Evaluate next 4 using the 5-case rotation rule
+    const { fourPlayers, remainingQueue } = getNextFourForCourt(existingQueue, state.groups);
+    if (fourPlayers) {
+      const teams = createTeams(fourPlayers);
+      nextTeamA = teams.teamA;
+      nextTeamB = teams.teamB;
+      nextMatchStartTime = now;
+      nextQueue = [...remainingQueue, ...updatedCourtPlayers];
+    } else {
+      nextQueue = [...existingQueue, ...updatedCourtPlayers];
+    }
   } else {
-    // Otherwise all 4 court players return to queue, court stays standby
+    // All 4 finished court players return to end of queue
     nextQueue = [...existingQueue, ...updatedCourtPlayers];
     nextTeamA = null;
     nextTeamB = null;
