@@ -586,20 +586,29 @@ export function finishCourtGameAndRotate(
     gamesPlayed: p.gamesPlayed + 1,
   }));
 
-  const combinedQueue = [...state.queue, ...updatedCourtPlayers];
+  // Existing queue before match finish
+  const existingQueue = [...state.queue];
 
   let nextTeamA: [Player, Player] | null = null;
   let nextTeamB: [Player, Player] | null = null;
-  let nextQueue: Player[] = combinedQueue;
+  let nextQueue: Player[];
   let nextMatchStartTime: number | null = null;
 
-  if (combinedQueue.length >= 4) {
-    const nextFour = combinedQueue.slice(0, 4);
-    nextQueue = combinedQueue.slice(4);
+  if (existingQueue.length >= 4) {
+    // If there were already 4+ players waiting in queue, start next match with them
+    const nextFour = existingQueue.slice(0, 4);
+    const remainingQueue = existingQueue.slice(4);
     const teams = createTeams(nextFour);
     nextTeamA = teams.teamA;
     nextTeamB = teams.teamB;
     nextMatchStartTime = now;
+    nextQueue = [...remainingQueue, ...updatedCourtPlayers];
+  } else {
+    // Otherwise all 4 court players return to queue, court stays standby
+    nextQueue = [...existingQueue, ...updatedCourtPlayers];
+    nextTeamA = null;
+    nextTeamB = null;
+    nextMatchStartTime = null;
   }
 
   const updatedCourt: CourtData = {
