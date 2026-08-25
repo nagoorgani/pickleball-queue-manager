@@ -1,4 +1,4 @@
-import type { CourtData, MatchRecord, MatchScores, PickleballState, Player } from '../types';
+import type { CourtData, MatchRecord, MatchScores, PickleballState, Player, PlayerGroup, DragItemData } from '../types';
 
 export const INITIAL_COURT_1: CourtData = {
   id: 1,
@@ -20,16 +20,19 @@ export const INITIAL_COURT_2: CourtData = {
   currentScores: { teamA: 0, teamB: 0 },
 };
 
-/**
- * Normalizes a player name for duplicate checking
- */
+const GROUP_COLORS = [
+  '#10b981', // emerald
+  '#0284c7', // sky
+  '#f59e0b', // amber
+  '#8b5cf6', // purple
+  '#ec4899', // rose
+  '#6366f1', // indigo
+];
+
 export function normalizeName(name: string): string {
   return name.trim().toLowerCase();
 }
 
-/**
- * Checks if a player name already exists in Court 1, Court 2, or queue
- */
 export function isDuplicateName(
   name: string,
   state: PickleballState,
@@ -44,9 +47,6 @@ export function isDuplicateName(
   );
 }
 
-/**
- * Extracts active players from a single court
- */
 export function getCourtPlayers(court: CourtData): Player[] {
   const players: Player[] = [];
   if (court.teamA) {
@@ -58,20 +58,12 @@ export function getCourtPlayers(court: CourtData): Player[] {
   return players;
 }
 
-/**
- * Retrieves all players across all active courts and queue
- */
 export function getAllPlayers(state: PickleballState): Player[] {
   const c1 = getCourtPlayers(state.court1);
   const c2 = getCourtPlayers(state.court2);
   return [...c1, ...c2, ...state.queue];
 }
 
-/**
- * Creates teams from an array of exactly 4 players.
- * Team 1 (A) = Player 1 + Player 2
- * Team 2 (B) = Player 3 + Player 4
- */
 export function createTeams(fourPlayers: Player[]): { teamA: [Player, Player] | null; teamB: [Player, Player] | null } {
   if (fourPlayers.length !== 4) {
     return { teamA: null, teamB: null };
@@ -83,10 +75,7 @@ export function createTeams(fourPlayers: Player[]): { teamA: [Player, Player] | 
 }
 
 /**
- * =========================================================================
- * ROTATION ALGORITHM: Add Player
- * =========================================================================
- * Every new player is ALWAYS added to the END of the queue.
+ * Add Player to end of queue
  */
 export function addPlayerToState(
   state: PickleballState,
@@ -111,14 +100,241 @@ export function addPlayerToState(
     gamesPlayed: 0,
   };
 
-  const nextQueue = [...state.queue, newPlayer];
+  return {
+    nextState: {
+      ...state,
+      queue: [...state.queue, newPlayer],
+    },
+    newPlayer,
+  };
+}
+
+/**
+ * =========================================================================
+ * PRESET GROUPS (PLAYER MATCHING / LINKED PAIRS)
+ * =========================================================================
+ */
+
+export function createPlayerGroup(
+  state: PickleballState,
+  playerIds: string[],
+  groupName?: string
+): { nextState: PickleballState; newGroup?: PlayerGroup; error?: string } {
+  if (playerIds.length < 2 || playerIds.length > 4) {
+    return { nextState: state, error: 'A preset group must contain between 2 and 4 players.' };
+  }
+
+  const allPlayers = getAllPlayers(state);
+  const targetPlayers = allPlayers.filter(p => playerIds.includes(p.id));
+
+  if (targetPlayers.length !== playerIds.length) {
+    return { nextState: state, error: 'Some selected players could not be found.' };
+  }
+
+  // Check if any player is already in a group
+  const alreadyGrouped = targetPlayers.find(p => p.groupId);
+  if (alreadyGrouped) {
+    return {
+      nextState: state,
+      error: `Player "${alreadyGrouped.name}" is already in a group. Please unlink them first.`,
+    };
+  }
+
+  const groupId = `group_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const color = GROUP_COLORS[state.groups.length % GROUP_COLORS.length];
+  const autoName = groupName?.trim() || `Duo: ${targetPlayers.map(p => p.name).join(' & ')}`;
+
+  const newGroup: PlayerGroup = {
+    id: groupId,
+    name: autoName,
+    playerIds,
+    color,
+    createdAt: Date.now(),
+  };
+
+  // Update players with groupId
+  const updatePlayerGroup = (p: Player): Player =>
+    playerIds.includes(p.id) ? { ...p, groupId } : p;
+
+  let nextQueue = state.queue.map(updatePlayerGroup);
+
+  // Group members in queue together so they sit adjacently as a single unit
+  const groupedInQueue = nextQueue.filter(p => playerIds.includes(p.id));
+  if (groupedInQueue.length > 0) {
+    // Find index of first member
+    const firstIdx = nextQueue.findIndex(p => playerIds.includes(p.id));
+    const nonGrouped = nextQueue.filter(p => !playerIds.includes(p.id));
+    nonGrouped.splice(firstIdx, 0, ...groupedInQueue);
+    nextQueue = nonGrouped;
+  }
+
+  const updateCourt = (c: CourtData): CourtData => ({
+    ...c,
+    teamA: c.teamA ? [updatePlayerGroup(c.teamA[0]), updatePlayerGroup(c.teamA[1])] : null,
+    teamB: c.teamB ? [updatePlayerGroup(c.teamB[0]), updatePlayerGroup(c.teamB[1])] : null,
+  });
 
   return {
     nextState: {
       ...state,
+      groups: [...state.groups, newGroup],
       queue: nextQueue,
+      court1: updateCourt(state.court1),
+      court2: updateCourt(state.court2),
     },
-    newPlayer,
+    newGroup,
+  };
+}
+
+export function unlinkPlayerGroup(
+  state: PickleballState,
+  groupId: string
+): { nextState: PickleballState } {
+  const removeGroupId = (p: Player): Player =>
+    p.groupId === groupId ? { ...p, groupId: undefined } : p;
+
+  const updateCourt = (c: CourtData): CourtData => ({
+    ...c,
+    teamA: c.teamA ? [removeGroupId(c.teamA[0]), removeGroupId(c.teamA[1])] : null,
+    teamB: c.teamB ? [removeGroupId(c.teamB[0]), removeGroupId(c.teamB[1])] : null,
+  });
+
+  return {
+    nextState: {
+      ...state,
+      groups: state.groups.filter(g => g.id !== groupId),
+      queue: state.queue.map(removeGroupId),
+      court1: updateCourt(state.court1),
+      court2: updateCourt(state.court2),
+    },
+  };
+}
+
+/**
+ * =========================================================================
+ * DRAG & DROP: Queue Reordering (Supports single players & linked groups)
+ * =========================================================================
+ */
+export function reorderQueueItem(
+  state: PickleballState,
+  draggedPlayerId: string,
+  targetIndex: number
+): PickleballState {
+  const queue = [...state.queue];
+  const draggedPlayer = queue.find(p => p.id === draggedPlayerId);
+  if (!draggedPlayer) return state;
+
+  let itemsToMove: Player[] = [draggedPlayer];
+  if (draggedPlayer.groupId) {
+    itemsToMove = queue.filter(p => p.groupId === draggedPlayer.groupId);
+  }
+
+  // Remove items to move
+  const remainingQueue = queue.filter(p => !itemsToMove.some(m => m.id === p.id));
+  const clampedTarget = Math.max(0, Math.min(targetIndex, remainingQueue.length));
+
+  remainingQueue.splice(clampedTarget, 0, ...itemsToMove);
+
+  return {
+    ...state,
+    queue: remainingQueue,
+  };
+}
+
+/**
+ * =========================================================================
+ * DRAG & DROP: Drag Player / Group to Court
+ * =========================================================================
+ */
+export function dropOnCourt(
+  state: PickleballState,
+  dragData: DragItemData,
+  targetCourtId: 1 | 2,
+  targetTeam?: 'teamA' | 'teamB'
+): PickleballState {
+  const targetCourtKey = targetCourtId === 1 ? 'court1' : 'court2';
+
+  if (targetCourtId === 2 && !state.isCourt2Available) return state;
+
+  const allPlayers = getAllPlayers(state);
+  const playersToMove = allPlayers.filter(p => dragData.playerIds.includes(p.id));
+  if (playersToMove.length === 0) return state;
+
+  // Remove moved players from queue & courts
+  let nextState = removePlayersFromState(state, dragData.playerIds);
+
+  const currentCourt = nextState[targetCourtKey];
+  let currentCourtPlayers = getCourtPlayers(currentCourt);
+
+  // Filter out any moved players if already on this court
+  currentCourtPlayers = currentCourtPlayers.filter(p => !dragData.playerIds.includes(p.id));
+
+  // Merge new players into court
+  const combinedCourtPlayers = [...currentCourtPlayers, ...playersToMove];
+
+  let newTeamA: [Player, Player] | null = currentCourt.teamA;
+  let newTeamB: [Player, Player] | null = currentCourt.teamB;
+
+  if (combinedCourtPlayers.length >= 4) {
+    const four = combinedCourtPlayers.slice(0, 4);
+    const teams = createTeams(four);
+    newTeamA = teams.teamA;
+    newTeamB = teams.teamB;
+  } else if (targetTeam === 'teamA' && playersToMove.length === 2) {
+    newTeamA = [playersToMove[0], playersToMove[1]];
+  } else if (targetTeam === 'teamB' && playersToMove.length === 2) {
+    newTeamB = [playersToMove[0], playersToMove[1]];
+  } else {
+    // Fill available slots sequentially
+    const currentList = [...(newTeamA || []), ...(newTeamB || [])];
+    const uniqueList = Array.from(new Set([...currentList, ...playersToMove]));
+    if (uniqueList.length >= 4) {
+      const teams = createTeams(uniqueList.slice(0, 4));
+      newTeamA = teams.teamA;
+      newTeamB = teams.teamB;
+    }
+  }
+
+  const updatedCourt: CourtData = {
+    ...currentCourt,
+    teamA: newTeamA,
+    teamB: newTeamB,
+    matchStartTime: newTeamA && newTeamB ? (currentCourt.matchStartTime || Date.now()) : null,
+  };
+
+  return {
+    ...nextState,
+    [targetCourtKey]: updatedCourt,
+  };
+}
+
+/**
+ * Remove array of player IDs from queue and courts without losing player state
+ */
+function removePlayersFromState(state: PickleballState, playerIds: string[]): PickleballState {
+  const cleanPlayer = (p: Player | null) => (p && playerIds.includes(p.id) ? null : p);
+
+  const cleanTeam = (team: [Player, Player] | null): [Player, Player] | null => {
+    if (!team) return null;
+    const a = cleanPlayer(team[0]);
+    const b = cleanPlayer(team[1]);
+    if (a && b) return [a, b];
+    return null;
+  };
+
+  return {
+    ...state,
+    queue: state.queue.filter(p => !playerIds.includes(p.id)),
+    court1: {
+      ...state.court1,
+      teamA: cleanTeam(state.court1.teamA),
+      teamB: cleanTeam(state.court1.teamB),
+    },
+    court2: {
+      ...state.court2,
+      teamA: cleanTeam(state.court2.teamA),
+      teamB: cleanTeam(state.court2.teamB),
+    },
   };
 }
 
@@ -163,11 +379,6 @@ export function startCourtMatch(
   };
 }
 
-/**
- * =========================================================================
- * ROTATION ALGORITHM: Start All Available Courts
- * =========================================================================
- */
 export function startAllAvailableCourts(state: PickleballState): {
   nextState: PickleballState;
   error?: string;
@@ -184,7 +395,6 @@ export function startAllAvailableCourts(state: PickleballState): {
   let nextCourt1 = { ...state.court1 };
   let nextCourt2 = { ...state.court2 };
 
-  // Fill Court 1 if needed
   if (!nextCourt1.teamA && queue.length >= 4) {
     const c1Players = queue.slice(0, 4);
     queue = queue.slice(4);
@@ -198,7 +408,6 @@ export function startAllAvailableCourts(state: PickleballState): {
     };
   }
 
-  // Fill Court 2 if available and enough players
   if (state.isCourt2Available && !nextCourt2.teamA && queue.length >= 4) {
     const c2Players = queue.slice(0, 4);
     queue = queue.slice(4);
@@ -224,7 +433,7 @@ export function startAllAvailableCourts(state: PickleballState): {
 
 /**
  * =========================================================================
- * ROTATION ALGORITHM: Finish Game on Specific Court
+ * ROTATION ALGORITHM: Finish Game & Group Preservation
  * =========================================================================
  */
 export function finishCourtGameAndRotate(
@@ -275,13 +484,13 @@ export function finishCourtGameAndRotate(
     scores: matchScores,
   };
 
-  // 1. Current 4 players get gamesPlayed + 1
+  // 1. Increment gamesPlayed
   const updatedCourtPlayers: Player[] = courtPlayers.map(p => ({
     ...p,
     gamesPlayed: p.gamesPlayed + 1,
   }));
 
-  // 2. Append finished players to the END of the waiting queue
+  // 2. Append finished court players to end of queue, preserving group groupings
   const combinedQueue = [...state.queue, ...updatedCourtPlayers];
 
   // 3. Take next 4 from queue for this court if available
@@ -318,17 +527,10 @@ export function finishCourtGameAndRotate(
   return { nextState, finishedMatch };
 }
 
-/**
- * =========================================================================
- * ADMIN FEATURE: Toggle Court 2 Availability (Promotion Match Mode)
- * =========================================================================
- */
 export function toggleCourt2Mode(state: PickleballState): PickleballState {
   const willBeAvailable = !state.isCourt2Available;
 
   if (!willBeAvailable) {
-    // Disabling Court 2 (Reserved for promotion matches)
-    // If Court 2 has active players, return them to the waiting queue cleanly
     const court2Players = getCourtPlayers(state.court2);
     const nextQueue = [...state.queue, ...court2Players];
 
@@ -345,7 +547,6 @@ export function toggleCourt2Mode(state: PickleballState): PickleballState {
       queue: nextQueue,
     };
   } else {
-    // Enabling Court 2
     return {
       ...state,
       isCourt2Available: true,
@@ -353,11 +554,6 @@ export function toggleCourt2Mode(state: PickleballState): PickleballState {
   }
 }
 
-/**
- * =========================================================================
- * ADMIN FEATURE: Shuffle Teams on a Specific Court
- * =========================================================================
- */
 export function shuffleCourtTeams(state: PickleballState, courtId: 1 | 2): {
   nextState: PickleballState;
   error?: string;
@@ -390,11 +586,6 @@ export function shuffleCourtTeams(state: PickleballState, courtId: 1 | 2): {
   };
 }
 
-/**
- * =========================================================================
- * ADMIN FEATURE: Swap Partners on a Specific Court
- * =========================================================================
- */
 export function swapCourtPartners(state: PickleballState, courtId: 1 | 2): {
   nextState: PickleballState;
   error?: string;
@@ -421,11 +612,6 @@ export function swapCourtPartners(state: PickleballState, courtId: 1 | 2): {
   };
 }
 
-/**
- * =========================================================================
- * ROTATION ALGORITHM: Remove Player
- * =========================================================================
- */
 export function removePlayerFromState(
   state: PickleballState,
   playerId: string
@@ -508,11 +694,6 @@ export function removePlayerFromState(
   return { nextState: state };
 }
 
-/**
- * =========================================================================
- * ROTATION ALGORITHM: Edit Player Name
- * =========================================================================
- */
 export function editPlayerNameInState(
   state: PickleballState,
   playerId: string,
@@ -548,11 +729,6 @@ export function editPlayerNameInState(
   };
 }
 
-/**
- * =========================================================================
- * Reset Session
- * =========================================================================
- */
 export function resetSessionInState(state: PickleballState): PickleballState {
   const allInOrder = [
     ...getCourtPlayers(state.court1),
@@ -582,11 +758,6 @@ export function resetSessionInState(state: PickleballState): PickleballState {
   };
 }
 
-/**
- * =========================================================================
- * Clear All Players
- * =========================================================================
- */
 export function clearAllInState(state: PickleballState): PickleballState {
   return {
     ...state,
@@ -607,6 +778,7 @@ export function clearAllInState(state: PickleballState): PickleballState {
       currentScores: { teamA: 0, teamB: 0 },
     },
     queue: [],
+    groups: [],
     matchHistory: [],
   };
 }

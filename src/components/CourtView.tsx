@@ -6,7 +6,7 @@ import {
   Play,
   RotateCcw,
 } from 'lucide-react';
-import type { CourtData, Player } from '../types';
+import type { CourtData, Player, DragItemData } from '../types';
 import { CourtCard } from './CourtCard';
 
 interface CourtViewProps {
@@ -25,6 +25,7 @@ interface CourtViewProps {
   onRequestResetSession: () => void;
   onEditPlayer: (player: Player) => void;
   onRequestRemovePlayer: (player: Player) => void;
+  onDropOnCourt?: (dragData: DragItemData, targetCourtId: 1 | 2, targetTeam?: 'teamA' | 'teamB') => void;
 }
 
 export const CourtView: React.FC<CourtViewProps> = ({
@@ -43,6 +44,7 @@ export const CourtView: React.FC<CourtViewProps> = ({
   onRequestResetSession,
   onEditPlayer,
   onRequestRemovePlayer,
+  onDropOnCourt,
 }) => {
   const hasAnyActiveCourt = Boolean(court1.teamA || (isCourt2Available && court2.teamA));
   const bothCourtsEmpty = !court1.teamA && (!isCourt2Available || !court2.teamA);
@@ -134,6 +136,7 @@ export const CourtView: React.FC<CourtViewProps> = ({
           onUpdateScores={(a, b) => onUpdateCourtScores(1, a, b)}
           onEditPlayer={onEditPlayer}
           onRequestRemovePlayer={onRequestRemovePlayer}
+          onDropOnCourt={onDropOnCourt}
         />
 
         {/* COURT 2 CARD */}
@@ -149,6 +152,7 @@ export const CourtView: React.FC<CourtViewProps> = ({
           onToggleAvailability={onToggleCourt2}
           onEditPlayer={onEditPlayer}
           onRequestRemovePlayer={onRequestRemovePlayer}
+          onDropOnCourt={onDropOnCourt}
         />
       </div>
     </section>

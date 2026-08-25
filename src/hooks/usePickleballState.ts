@@ -1,12 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import confetti from 'canvas-confetti';
-import type {
-  PickleballState,
-  HistoryEntry,
-  ToastMessage,
-  NotificationType,
-  Player,
-} from '../types';
+import { useState, useEffect, useCallback } from 'react';
+import type { HistoryEntry, PickleballState, ToastMessage, DragItemData } from '../types';
 import {
   loadStateFromStorage,
   saveStateToStorage,
@@ -23,45 +16,44 @@ import {
   editPlayerNameInState,
   resetSessionInState,
   clearAllInState,
+  createPlayerGroup,
+  unlinkPlayerGroup,
+  reorderQueueItem,
+  dropOnCourt,
   DEMO_PLAYERS,
 } from '../utils/rotation';
 import { soundFx } from '../utils/sound';
 
-const MAX_HISTORY_LENGTH = 25;
-
 export function usePickleballState() {
-  const [state, setState] = useState<PickleballState>(loadStateFromStorage);
+  const [state, setState] = useState<PickleballState>(() => loadStateFromStorage());
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const isInitialMount = useRef(true);
 
-  // Sync with Local Storage
+  // Auto-save on state change
   useEffect(() => {
-    if (isInitialMount.current) {
-      isInitialMount.current = false;
-      return;
-    }
     saveStateToStorage(state);
   }, [state]);
 
-  // Sync theme
+  // Apply dark/light class to root document
   useEffect(() => {
+    const root = document.documentElement;
     if (state.theme === 'dark') {
-      document.documentElement.classList.add('dark');
+      root.classList.add('dark');
     } else {
-      document.documentElement.classList.remove('dark');
+      root.classList.remove('dark');
     }
   }, [state.theme]);
 
-  // Toast notifier
-  const addToast = useCallback(
-    (title: string, description?: string, type: NotificationType = 'info') => {
-      const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      setToasts(prev => [...prev, { id, title, description, type }]);
+  // Push entry onto undo history stack
+  const pushHistory = useCallback((description: string, currentState: PickleballState) => {
+    setHistory(prev => [{ state: currentState, description }, ...prev.slice(0, 19)]);
+  }, []);
 
-      setTimeout(() => {
-        setToasts(prev => prev.filter(t => t.id !== id));
-      }, 4000);
+  // Toast System
+  const addToast = useCallback(
+    (title: string, description?: string, type: ToastMessage['type'] = 'info') => {
+      const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      setToasts(prev => [...prev.slice(-3), { id, title, description, type }]);
     },
     []
   );
@@ -70,121 +62,134 @@ export function usePickleballState() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
-  const pushHistory = useCallback((description: string, currentState: PickleballState) => {
-    setHistory(prev => [
-      { state: currentState, description },
-      ...prev.slice(0, MAX_HISTORY_LENGTH - 1),
-    ]);
-  }, []);
-
   // 1. Add Player
   const handleAddPlayer = useCallback(
-    (name: string) => {
-      const { nextState, error, newPlayer } = addPlayerToState(state, name);
+    (playerName: string) => {
+      const { nextState, error, newPlayer } = addPlayerToState(state, playerName);
       if (error) {
-        addToast('Cannot Add Player', error, 'error');
+        addToast('Cannot Add Player', error, 'warning');
         return false;
       }
-      pushHistory(`Added player "${newPlayer?.name}"`, state);
 
-      // Auto-fill empty court if 4+ players ready
-      if (!nextState.court1.teamA && nextState.queue.length >= 4) {
-        const started = startCourtMatch(nextState, 1);
-        setState(started.nextState);
-        if (state.soundEnabled) soundFx.playWhistle();
-        addToast('Player Added & Court 1 Ready', `"${newPlayer?.name}" added. Match 1 started on Court 1!`, 'success');
-      } else if (nextState.isCourt2Available && !nextState.court2.teamA && nextState.queue.length >= 4) {
-        const started = startCourtMatch(nextState, 2);
-        setState(started.nextState);
-        if (state.soundEnabled) soundFx.playWhistle();
-        addToast('Player Added & Court 2 Ready', `"${newPlayer?.name}" added. Match 1 started on Court 2!`, 'success');
-      } else {
-        setState(nextState);
-        if (state.soundEnabled) soundFx.playPop();
-        addToast('Player Added', `"${newPlayer?.name}" joined the waiting queue.`, 'success');
-      }
+      pushHistory(`Added player "${newPlayer?.name}"`, state);
+      setState(nextState);
+      if (state.soundEnabled) soundFx.playPop();
+      addToast('Player Added', `"${newPlayer?.name}" joined the waiting queue.`, 'success');
       return true;
     },
     [state, addToast, pushHistory]
   );
 
-  // 2. Start Court Match
+  // 2. Preset Group Creation
+  const handleCreateGroup = useCallback(
+    (playerIds: string[], groupName?: string) => {
+      const { nextState, newGroup, error } = createPlayerGroup(state, playerIds, groupName);
+      if (error) {
+        addToast('Group Creation Failed', error, 'warning');
+        return false;
+      }
+
+      pushHistory(`Created preset group "${newGroup?.name}"`, state);
+      setState(nextState);
+      if (state.soundEnabled) soundFx.playWhistle();
+      addToast('Preset Group Created!', `Linked ${playerIds.length} players into "${newGroup?.name}".`, 'success');
+      return true;
+    },
+    [state, addToast, pushHistory]
+  );
+
+  // 3. Unlink Group
+  const handleUnlinkGroup = useCallback(
+    (groupId: string) => {
+      const group = state.groups.find(g => g.id === groupId);
+      const { nextState } = unlinkPlayerGroup(state, groupId);
+
+      pushHistory(`Unlinked group "${group?.name || groupId}"`, state);
+      setState(nextState);
+      if (state.soundEnabled) soundFx.playUndo();
+      addToast('Group Unlinked', `Group "${group?.name || 'Duo'}" unlinked into individual players.`, 'info');
+    },
+    [state, addToast, pushHistory]
+  );
+
+  // 4. Reorder Queue (Drag & Drop)
+  const handleReorderQueue = useCallback(
+    (draggedPlayerId: string, targetIndex: number) => {
+      const nextState = reorderQueueItem(state, draggedPlayerId, targetIndex);
+      pushHistory('Reordered queue via drag-and-drop', state);
+      setState(nextState);
+      if (state.soundEnabled) soundFx.playPop();
+    },
+    [state, pushHistory]
+  );
+
+  // 5. Drop on Court (Drag & Drop)
+  const handleDropOnCourt = useCallback(
+    (dragData: DragItemData, targetCourtId: 1 | 2, targetTeam?: 'teamA' | 'teamB') => {
+      const nextState = dropOnCourt(state, dragData, targetCourtId, targetTeam);
+      pushHistory(`Moved player/group to Court ${targetCourtId}`, state);
+      setState(nextState);
+      if (state.soundEnabled) soundFx.playPop();
+      addToast('Court Updated', `Player/Group assigned to Court ${targetCourtId}.`, 'success');
+    },
+    [state, addToast, pushHistory]
+  );
+
+  // 6. Start Match on Court
   const handleStartCourt = useCallback(
     (courtId: 1 | 2) => {
       const { nextState, error } = startCourtMatch(state, courtId);
       if (error) {
-        addToast(`Cannot Start Court ${courtId}`, error, 'warning');
+        addToast('Cannot Start Match', error, 'warning');
         return false;
       }
-      pushHistory(`Started Court ${courtId} Match`, state);
+
+      const courtName = courtId === 1 ? state.court1.name : state.court2.name;
+      pushHistory(`Started match on ${courtName}`, state);
       setState(nextState);
       if (state.soundEnabled) soundFx.playWhistle();
-      addToast(`Court ${courtId} Match Started!`, `4 players rotated onto Court ${courtId}.`, 'success');
+      addToast('Match Started!', `${courtName} match is now live.`, 'success');
       return true;
     },
     [state, addToast, pushHistory]
   );
 
-  // 3. Start All Available Courts
+  // 7. Start All Available Courts
   const handleStartAllCourts = useCallback(() => {
     const { nextState, error } = startAllAvailableCourts(state);
     if (error) {
-      addToast('Cannot Start Courts', error, 'warning');
+      addToast('Cannot Start Session', error, 'warning');
       return false;
     }
-    pushHistory('Started All Available Courts', state);
+
+    pushHistory('Started match session across courts', state);
     setState(nextState);
     if (state.soundEnabled) soundFx.playWhistle();
-    addToast('Courts Started!', 'Available courts are active with matches.', 'success');
+    addToast('Session Started!', 'Available courts have been populated with players.', 'success');
     return true;
   }, [state, addToast, pushHistory]);
 
-  // 4. Finish Game on Specific Court
+  // 8. Finish Game & Rotate
   const handleFinishCourtGame = useCallback(
-    (courtId: 1 | 2, customScores?: { teamA: number; teamB: number }) => {
-      const targetCourt = courtId === 1 ? state.court1 : state.court2;
-      const scoresToRecord = customScores || targetCourt.currentScores;
-
-      const { nextState, finishedMatch, error } = finishCourtGameAndRotate(
-        state,
-        courtId,
-        scoresToRecord
-      );
+    (courtId: 1 | 2, scores?: { teamA: number; teamB: number }) => {
+      const { nextState, finishedMatch, error } = finishCourtGameAndRotate(state, courtId, scores);
       if (error) {
-        addToast('Action Failed', error, 'error');
+        addToast('Cannot Finish Match', error, 'warning');
         return false;
       }
 
-      pushHistory(`Finished Court ${courtId} Match #${finishedMatch?.matchNumber}`, state);
+      const courtName = courtId === 1 ? state.court1.name : state.court2.name;
+      pushHistory(`Finished match on ${courtName}`, state);
       setState(nextState);
 
-      try {
-        confetti({
-          particleCount: 75,
-          spread: 65,
-          origin: { y: 0.6 },
-          colors: ['#84cc16', '#10b981', '#38bdf8', '#fbbf24'],
-        });
-      } catch {
-        // Confetti fallback
-      }
+      if (state.soundEnabled) soundFx.playCelebration();
 
-      if (state.soundEnabled) {
-        soundFx.playCelebration();
-      }
-
-      const scoreText =
-        scoresToRecord.teamA > 0 || scoresToRecord.teamB > 0
-          ? ` (${scoresToRecord.teamA} - ${scoresToRecord.teamB})`
-          : '';
-
-      const nextTargetCourt = courtId === 1 ? nextState.court1 : nextState.court2;
-
+      const scoreText = finishedMatch?.scores
+        ? ` (${finishedMatch.scores.teamA} - ${finishedMatch.scores.teamB})`
+        : '';
       addToast(
-        `Court ${courtId} Match #${finishedMatch?.matchNumber} Finished!${scoreText}`,
-        nextTargetCourt.teamA
-          ? `Court ${courtId} rotated with next 4 players from queue.`
-          : `Court ${courtId} players returned to queue. Waiting for more players.`,
+        'Match Completed! 🎉',
+        `${courtName} finished${scoreText}. Players rotated to end of queue.`,
         'success'
       );
       return true;
@@ -192,28 +197,32 @@ export function usePickleballState() {
     [state, addToast, pushHistory]
   );
 
-  // 5. Toggle Court 2 Availability (Promotion Match Mode)
+  // 9. Toggle Court 2 Availability Mode
   const handleToggleCourt2 = useCallback(() => {
     const nextState = toggleCourt2Mode(state);
-    const isNowAvailable = nextState.isCourt2Available;
+    const wasAvailable = state.isCourt2Available;
 
-    pushHistory(
-      isNowAvailable ? 'Enabled Court 2 (2 Courts Active)' : 'Reserved Court 2 for Promotion Matches (1 Court Active)',
-      state
-    );
+    pushHistory(wasAvailable ? 'Reserved Court 2 for Promotion Matches' : 'Enabled Court 2 for Open Queue', state);
     setState(nextState);
+
     if (state.soundEnabled) soundFx.playPop();
 
-    addToast(
-      isNowAvailable ? '2 Courts Mode Activated' : '1 Court Mode (Court 2 Reserved)',
-      isNowAvailable
-        ? 'Both Court 1 and Court 2 are available for open queue rotation.'
-        : 'Court 2 is now marked for Promotion Matches. Active rotations run on Court 1 only.',
-      'info'
-    );
+    if (wasAvailable) {
+      addToast(
+        '1 Court Mode Active',
+        'Court 2 reserved for promotion matches. Active Court 2 players returned to queue.',
+        'info'
+      );
+    } else {
+      addToast(
+        '2 Courts Mode Active',
+        'Court 2 is now available for open queue rotations.',
+        'success'
+      );
+    }
   }, [state, addToast, pushHistory]);
 
-  // 6. Shuffle Court Teams
+  // 10. Shuffle Court Teams
   const handleShuffleCourt = useCallback(
     (courtId: 1 | 2) => {
       const { nextState, error } = shuffleCourtTeams(state, courtId);
@@ -221,16 +230,17 @@ export function usePickleballState() {
         addToast('Shuffle Failed', error, 'warning');
         return false;
       }
-      pushHistory(`Shuffled Court ${courtId} Teams`, state);
+
+      pushHistory(`Shuffled teams on Court ${courtId}`, state);
       setState(nextState);
       if (state.soundEnabled) soundFx.playPop();
-      addToast(`Court ${courtId} Teams Shuffled`, 'Players randomly assigned to new teams.', 'info');
+      addToast(`Court ${courtId} Shuffled`, 'Active players re-paired into new teams.', 'info');
       return true;
     },
     [state, addToast, pushHistory]
   );
 
-  // 7. Swap Court Partners
+  // 11. Swap Court Partners
   const handleSwapCourt = useCallback(
     (courtId: 1 | 2) => {
       const { nextState, error } = swapCourtPartners(state, courtId);
@@ -238,7 +248,8 @@ export function usePickleballState() {
         addToast('Swap Failed', error, 'warning');
         return false;
       }
-      pushHistory(`Swapped Court ${courtId} Partners`, state);
+
+      pushHistory(`Swapped partners on Court ${courtId}`, state);
       setState(nextState);
       if (state.soundEnabled) soundFx.playPop();
       addToast(`Court ${courtId} Partners Swapped`, 'Swapped player pairings on court.', 'info');
@@ -247,7 +258,7 @@ export function usePickleballState() {
     [state, addToast, pushHistory]
   );
 
-  // 8. Update Court Live Scores
+  // 12. Update Court Live Scores
   const handleUpdateCourtScores = useCallback(
     (courtId: 1 | 2, teamA: number, teamB: number) => {
       setState(prev => {
@@ -267,7 +278,7 @@ export function usePickleballState() {
     []
   );
 
-  // 9. Remove Player
+  // 13. Remove Player
   const handleRemovePlayer = useCallback(
     (playerId: string) => {
       const { nextState, removedPlayer } = removePlayerFromState(state, playerId);
@@ -282,7 +293,7 @@ export function usePickleballState() {
     [state, addToast, pushHistory]
   );
 
-  // 10. Edit Player Name
+  // 14. Edit Player Name
   const handleEditPlayer = useCallback(
     (playerId: string, newName: string) => {
       const { nextState, error } = editPlayerNameInState(state, playerId, newName);
@@ -299,7 +310,7 @@ export function usePickleballState() {
     [state, addToast, pushHistory]
   );
 
-  // 11. Reset Session
+  // 15. Reset Session
   const handleResetSession = useCallback(() => {
     pushHistory('Reset Court Session', state);
     const nextState = resetSessionInState(state);
@@ -308,7 +319,7 @@ export function usePickleballState() {
     addToast('Session Reset', 'All players returned to waiting queue.', 'info');
   }, [state, addToast, pushHistory]);
 
-  // 12. Clear All
+  // 16. Clear All
   const handleClearAll = useCallback(() => {
     pushHistory('Cleared All Players', state);
     const nextState = clearAllInState(state);
@@ -317,26 +328,24 @@ export function usePickleballState() {
     addToast('Queue Cleared', 'All players, courts, and scores have been cleared.', 'info');
   }, [state, addToast, pushHistory]);
 
-  // 13. Load Demo Players (12 players to fill both courts + queue!)
+  // 17. Load Demo Players
   const handleLoadDemoPlayers = useCallback(() => {
-    pushHistory('Loaded Demo Players (12 players)', state);
+    pushHistory('Loaded Demo Players', state);
     let currentState = clearAllInState(state);
     currentState = { ...currentState, isCourt2Available: true };
 
-    const addedPlayers: Player[] = [];
     DEMO_PLAYERS.forEach(name => {
-      const { nextState, newPlayer } = addPlayerToState(currentState, name);
+      const { nextState } = addPlayerToState(currentState, name);
       currentState = nextState;
-      if (newPlayer) addedPlayers.push(newPlayer);
     });
 
     const { nextState } = startAllAvailableCourts(currentState);
     setState(nextState);
     if (state.soundEnabled) soundFx.playWhistle();
-    addToast('12 Demo Players Loaded!', 'Court 1 and Court 2 are active, remaining players in queue.', 'success');
+    addToast('Demo Players Loaded!', 'Court 1 and Court 2 populated, remaining in queue.', 'success');
   }, [state, addToast, pushHistory]);
 
-  // 14. Undo Last Action
+  // 18. Undo Last Action
   const handleUndo = useCallback(() => {
     if (history.length === 0) {
       addToast('Nothing to Undo', 'No previous actions found in history.', 'info');
@@ -350,7 +359,7 @@ export function usePickleballState() {
     addToast('Action Undone', `Reverted: ${lastHistoryItem.description}`, 'info');
   }, [history, state.soundEnabled, addToast]);
 
-  // 15. Toggles
+  // 19. Toggles
   const handleToggleTheme = useCallback(() => {
     setState(prev => ({
       ...prev,
@@ -374,6 +383,10 @@ export function usePickleballState() {
     addToast,
     removeToast,
     addPlayer: handleAddPlayer,
+    createGroup: handleCreateGroup,
+    unlinkGroup: handleUnlinkGroup,
+    reorderQueue: handleReorderQueue,
+    dropOnCourt: handleDropOnCourt,
     startCourt: handleStartCourt,
     startAllCourts: handleStartAllCourts,
     finishCourtGame: handleFinishCourtGame,

@@ -1,13 +1,14 @@
 import type { PickleballState, CourtData } from '../types';
 import { INITIAL_COURT_1, INITIAL_COURT_2 } from './rotation';
 
-const STORAGE_KEY = 'pickleball_queue_manager_v2';
+const STORAGE_KEY = 'pickleball_queue_manager_v3';
 
 export const DEFAULT_INITIAL_STATE: PickleballState = {
   court1: INITIAL_COURT_1,
   court2: INITIAL_COURT_2,
-  isCourt2Available: true, // Default: both courts available
+  isCourt2Available: true,
   queue: [],
+  groups: [],
   matchHistory: [],
   theme: 'dark',
   soundEnabled: true,
@@ -22,25 +23,20 @@ export function loadStateFromStorage(): PickleballState {
   try {
     const serialized = localStorage.getItem(STORAGE_KEY);
     if (!serialized) {
-      // Check for v1 storage migration
-      const oldSerialized = localStorage.getItem('pickleball_queue_manager_v1');
+      // Check v2 or v1 storage fallback
+      const oldSerialized = localStorage.getItem('pickleball_queue_manager_v2') || localStorage.getItem('pickleball_queue_manager_v1');
       const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       if (oldSerialized) {
         try {
           const old = JSON.parse(oldSerialized);
           return {
             ...DEFAULT_INITIAL_STATE,
-            court1: {
-              ...INITIAL_COURT_1,
-              teamA: old.court?.teamA || null,
-              teamB: old.court?.teamB || null,
-              matchStartTime: old.matchStartTime || null,
-              matchNumber: old.matchNumber || 1,
-              currentScores: old.currentScores || { teamA: 0, teamB: 0 },
-            },
-            court2: INITIAL_COURT_2,
-            isCourt2Available: true,
+            court1: old.court1 || INITIAL_COURT_1,
+            court2: old.court2 || INITIAL_COURT_2,
+            isCourt2Available: typeof old.isCourt2Available === 'boolean' ? old.isCourt2Available : true,
             queue: Array.isArray(old.queue) ? old.queue : [],
+            groups: Array.isArray(old.groups) ? old.groups : [],
+            matchHistory: Array.isArray(old.matchHistory) ? old.matchHistory : [],
             theme: old.theme === 'light' ? 'light' : 'dark',
             soundEnabled: typeof old.soundEnabled === 'boolean' ? old.soundEnabled : true,
           };
@@ -72,6 +68,7 @@ export function loadStateFromStorage(): PickleballState {
       court2: safeCourt(parsed.court2, INITIAL_COURT_2),
       isCourt2Available: typeof parsed.isCourt2Available === 'boolean' ? parsed.isCourt2Available : true,
       queue: Array.isArray(parsed.queue) ? parsed.queue : [],
+      groups: Array.isArray(parsed.groups) ? parsed.groups : [],
       matchHistory: Array.isArray(parsed.matchHistory) ? parsed.matchHistory : [],
       theme: parsed.theme === 'light' ? 'light' : 'dark',
       soundEnabled: typeof parsed.soundEnabled === 'boolean' ? parsed.soundEnabled : true,

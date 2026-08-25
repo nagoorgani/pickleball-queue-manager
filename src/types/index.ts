@@ -3,9 +3,18 @@ export interface Player {
   name: string;
   joinedAt: number; // Unix timestamp in ms
   gamesPlayed: number;
+  groupId?: string; // ID of preset group if linked
 }
 
 export type Team = [Player, Player];
+
+export interface PlayerGroup {
+  id: string;
+  name: string;
+  playerIds: string[];
+  color: string; // Tailwind color token or hex
+  createdAt: number;
+}
 
 export interface CourtData {
   id: 1 | 2;
@@ -38,7 +47,7 @@ export interface MatchRecord {
 
 export interface AdminCredentials {
   loginId: string;
-  passwordHash: string; // Stored hash or token
+  passwordHash: string;
   updatedAt: number;
 }
 
@@ -50,8 +59,9 @@ export interface AuthState {
 export interface PickleballState {
   court1: CourtData;
   court2: CourtData;
-  isCourt2Available: boolean; // If false: Court 2 is reserved for promotion matches
+  isCourt2Available: boolean;
   queue: Player[];
+  groups: PlayerGroup[];
   matchHistory: MatchRecord[];
   theme: 'dark' | 'light';
   soundEnabled: boolean;
@@ -69,4 +79,14 @@ export interface ToastMessage {
   title: string;
   description?: string;
   type: NotificationType;
+}
+
+export interface DragItemData {
+  type: 'player' | 'group';
+  id: string; // playerId or groupId
+  playerIds: string[]; // all player IDs involved
+  source: 'queue' | 'court';
+  courtId?: 1 | 2;
+  team?: 'teamA' | 'teamB';
+  queueIndex?: number;
 }

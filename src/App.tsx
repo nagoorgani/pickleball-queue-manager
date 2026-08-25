@@ -12,6 +12,7 @@ import { EditPlayerModal } from './components/EditPlayerModal';
 import { ConfirmationModal } from './components/ConfirmationModal';
 import { MatchHistoryModal } from './components/MatchHistoryModal';
 import { AdminSettingsModal } from './components/AdminSettingsModal';
+import { GroupManagerModal } from './components/GroupManagerModal';
 import { LoginPage } from './components/LoginPage';
 import { ToastContainer } from './components/Toast';
 
@@ -30,6 +31,10 @@ export function App() {
     removeToast,
     addToast,
     addPlayer,
+    createGroup,
+    unlinkGroup,
+    reorderQueue,
+    dropOnCourt,
     startCourt,
     startAllCourts,
     finishCourtGame,
@@ -57,6 +62,7 @@ export function App() {
   const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogType>(null);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [isAdminSettingsOpen, setIsAdminSettingsOpen] = useState(false);
+  const [isGroupManagerOpen, setIsGroupManagerOpen] = useState(false);
 
   useEffect(() => {
     setIsAuthenticated(checkAdminSession());
@@ -174,6 +180,7 @@ export function App() {
               onRequestRemovePlayer={player =>
                 setConfirmDialog({ type: 'remove_player', player })
               }
+              onDropOnCourt={dropOnCourt}
             />
 
             {/* Section 2: Next Match Preview */}
@@ -187,10 +194,14 @@ export function App() {
           <div className="lg:col-span-5 space-y-6">
             <WaitingQueue
               queue={state.queue}
+              groups={state.groups}
               onEditPlayer={player => setEditingPlayer(player)}
               onRequestRemovePlayer={player =>
                 setConfirmDialog({ type: 'remove_player', player })
               }
+              onUnlinkGroup={unlinkGroup}
+              onOpenGroupManager={() => setIsGroupManagerOpen(true)}
+              onReorderQueue={reorderQueue}
             />
           </div>
         </div>
@@ -198,7 +209,7 @@ export function App() {
 
       {/* Footer */}
       <footer className="py-6 text-center text-xs text-slate-500 dark:text-slate-500 border-t border-slate-200 dark:border-slate-800/80">
-        <p>Pickleball Queue Manager • Single-Admin Secured • Multi-Court Fair FIFO Rotation</p>
+        <p>Pickleball Queue Manager • Drag & Drop Queue Reordering • Preset Partner Groups • Single-Admin Secured</p>
       </footer>
 
       {/* Modals & Dialogs */}
@@ -214,6 +225,16 @@ export function App() {
         currentLoginId={adminUsername}
         onClose={() => setIsAdminSettingsOpen(false)}
         onCredentialsUpdated={newId => setAdminUsername(newId)}
+      />
+
+      <GroupManagerModal
+        isOpen={isGroupManagerOpen}
+        onClose={() => setIsGroupManagerOpen(false)}
+        queue={state.queue}
+        allPlayers={allPlayers}
+        groups={state.groups}
+        onCreateGroup={createGroup}
+        onUnlinkGroup={unlinkGroup}
       />
 
       <ConfirmationModal
